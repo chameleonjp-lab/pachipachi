@@ -59,3 +59,8 @@
 - 添付の約402×874 CSSピクセル相当の縦画面で、LCDを11.55remのコンパクト状態表示へ切り替えた。初期ビュー内に上皿・下皿・保留・盤面・LEFT／RIGHT・FIRE・PUSH・RESET・TRAY TRANSFERが連続して見える。
 - 縦向き専用の`portrait-oracle-compact`を導入し、待機時は「運命待機」と3図柄、ATTACKER時は「RED ACCESS」を常時表示する。設定は同サイズで全幅ボトムシートとして確認済み。
 - 公式主紋をLCD／盤面の接合部へ追加し、盤面釘路の通常ガイド文言を`GATE LOCK`へ変更した。402×874の縦画面で通常・ATTACKER・設定ボトムシートを確認し、型チェックと本番ビルドを完了した。
+
+## GitHub完全移行（2026-08-21）
+
+- `chameleonjp-lab/pachipachi`の`chore/migrate-gekiazu-rush`へ、全ソース、依存関係定義、設計資料、運用メモを含む117ファイルを移行した。コミットは`726d271`（`feat: migrate GEKIAZU RUSH pachinko game`）。
+- `.manus-logs/`、`client/public/__manus__/`、`.project-config.json`、ビルド成果物、依存パッケージ、環境変数をGit追跡から除外した。PR #1は`main`宛てでOPEN： https://github.com/chameleonjp-lab/pachipachi/pull/1

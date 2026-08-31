@@ -7,9 +7,11 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { Slider } from "@/components/ui/slider";
 import { GAME_ASSETS } from "@/game/assets";
 import { BOARD_BUMPERS, BOARD_PINS, BOARD_RAILS } from "@/game/PachinkoBoard";
+import { homeShareText, LAB_URL, readPlayerName, resultShareText, savePlayerName, scoreForResult, shareOrCopy, shareStatusText, submitAndLoadRanking, type RankingRow } from "@/game/platform";
 import { createGameScene, type GameHandle } from "@/game/scene";
 import { createShareCard, createShareText, createXIntentUrl, downloadShareCard } from "@/game/shareCard";
 import { INITIAL_GAME_STATE, MAX_ACTIVE_BALLS, type DisplaySymbol, type GameState, type Outcome } from "@/game/types";
+import "@/game/platform.css";
 
 const OUTCOME_LABELS: Record<Outcome, { title: string; kicker: string }> = {
   miss: { title: "信号途絶", kicker: "図柄、非同期" },
@@ -40,6 +42,13 @@ export default function GameCanvas() {
   const handleRef = useRef<GameHandle | null>(null);
   const [game, setGame] = useState<GameState>(INITIAL_GAME_STATE);
   const [shareStatus, setShareStatus] = useState("");
+  const [playerName, setPlayerName] = useState(() => readPlayerName());
+  const [nameDraft, setNameDraft] = useState(() => readPlayerName());
+  const [nameError, setNameError] = useState("");
+  const [nameShareStatus, setNameShareStatus] = useState("");
+  const [ranking, setRanking] = useState<RankingRow[]>([]);
+  const [rankingStatus, setRankingStatus] = useState("ランキング登録：待機中");
+  const resultSubmissionKeyRef = useRef<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(window.location.search).has("settings"));
   const [settings, setSettings] = useState<GameSettings>(loadSettings);
   const isHandleDown = useRef(false);
@@ -76,6 +85,34 @@ export default function GameCanvas() {
     handleRef.current?.setVolume(settings.volume);
   }, [settings]);
 
+  useEffect(() => {
+    if (game.phase !== "result" || !game.outcome) {
+      resultSubmissionKeyRef.current = null;
+      return;
+    }
+    if (!playerName) return;
+    const score = scoreForResult(game);
+    const resultKey = [game.playCount, game.outcome, score, game.totalPaidBalls, game.supportChain].join(":");
+    if (resultSubmissionKeyRef.current === resultKey) return;
+    resultSubmissionKeyRef.current = resultKey;
+    let active = true;
+    setRanking([]);
+    setRankingStatus("ランキング登録中…");
+    void submitAndLoadRanking(score, playerName)
+      .then(rows => {
+        if (!active) return;
+        setRanking(rows);
+        setRankingStatus("オンラインランキングに反映しました");
+      })
+      .catch(() => {
+        if (!active) return;
+        setRankingStatus("ランキングは現在利用できません（結果は表示されています）");
+      });
+    return () => {
+      active = false;
+    };
+  }, [game.outcome, game.phase, game.playCount, game.supportChain, game.totalPaidBalls, playerName]);
+
   const startHandle = useCallback(() => { isHandleDown.current = true; handleRef.current?.setHandle(true); }, []);
   const stopHandle = useCallback(() => { isHandleDown.current = false; handleRef.current?.setHandle(false); }, []);
   const setPower = useCallback((value: number) => handleRef.current?.setHandlePower(value), []);
@@ -88,6 +125,8 @@ export default function GameCanvas() {
   const resetSettings = useCallback(() => setSettings(DEFAULT_SETTINGS), []);
   const result = game.outcome ? OUTCOME_LABELS[game.outcome] : null;
   const isVariating = game.phase === "variation" || game.phase === "reach";
+  const resultScore = game.outcome ? scoreForResult(game) : 0;
+  const resultText = game.outcome ? resultShareText(game) : "";
 
   const shareResult = useCallback(async () => {
     if (!game.outcome) return;
@@ -107,9 +146,44 @@ export default function GameCanvas() {
     }
   }, [game.outcome, game.playCount]);
 
+  const submitPlayerName = () => {
+    const name = savePlayerName(nameDraft);
+    if (!name) {
+      setNameError("プレイヤー名を入力してください");
+      return;
+    }
+    setPlayerName(name);
+    setNameDraft(name);
+    setNameError("");
+    setNameShareStatus("");
+  };
+
+  const shareHome = () => {
+    void shareOrCopy(homeShareText()).then(result => setNameShareStatus(shareStatusText(result)));
+  };
+
+  const shareResultText = () => {
+    void shareOrCopy(resultText).then(result => setShareStatus(shareStatusText(result)));
+  };
+
   return (
     <main className={`game-shell pachinko-shell phase-${game.phase} omen-${game.omen} feedback-${game.feedback} nail-event-${game.nailEvent} ${game.outcome ? `outcome-${game.outcome}` : ""} ${game.handleActive ? "handle-active" : ""} ${game.activeBalls.length >= MAX_ACTIVE_BALLS ? "board-full" : ""} ${game.shotRoute === "right" ? "right-shot-active" : ""} ${game.activeSource === "right" && (game.phase === "reach" || game.phase === "revival") ? "relay-ritual-active" : ""}`} style={{ "--machine-reference": `url(${GAME_ASSETS.machineReference})`, "--cyber-circuit-bg": `url(${GAME_ASSETS.cyberCircuitBackground})`, "--effect-level": settings.effects / 100 } as React.CSSProperties}>
       <canvas ref={canvasRef} className="game-canvas" aria-hidden="true" />
+      {!playerName && (
+        <section className="player-name-gate" role="dialog" aria-modal="true" aria-labelledby="pachipachi-name-title">
+          <div className="player-name-gate__panel">
+            <p className="eyebrow">PLAYER ACCESS / VIRTUAL FATE MODE</p>
+            <h2 id="pachipachi-name-title">名前を入力して遊技開始</h2>
+            <p>結果のシェア文とオンラインランキングに使う名前です。</p>
+            <label htmlFor="pachipachi-player-name">プレイヤー名（必須）</label>
+            <input id="pachipachi-player-name" value={nameDraft} maxLength={20} autoComplete="nickname" placeholder="名前を入力" onChange={event => { setNameDraft(event.target.value); if (nameError) setNameError(""); }} />
+            <span className="player-name-gate__status" role="status">{nameError || "名前を入力しないと始動口を操作できません"}</span>
+            <button type="button" className="player-name-gate__submit" onClick={submitPlayerName}>この名前で遊技開始 <span>↗</span></button>
+            <div className="player-name-gate__links"><button type="button" onClick={shareHome}>ゲームをシェア</button><a href={LAB_URL} target="_blank" rel="noreferrer">実験場へ</a></div>
+            {nameShareStatus && <span className="player-name-gate__status" role="status">{nameShareStatus}</span>}
+          </div>
+        </section>
+      )}
       <div className="cyber-grid" aria-hidden="true" /><div className="circuit-stream circuit-stream--one" aria-hidden="true" /><div className="circuit-stream circuit-stream--two" aria-hidden="true" /><div className="machine-grain" aria-hidden="true" /><div className="screen-scanlines" aria-hidden="true" /><div className="lightning-field" aria-hidden="true" />
       <section className="game-hud" aria-label="GEKIAZU RUSH パチンコ筐体">
         <header className="machine-header">
@@ -135,6 +209,7 @@ export default function GameCanvas() {
             {game.phase === "support" && <><div className="support-meter"><span style={{ width: `${(game.supportGames / 5) * 100}%` }} /><b>KAGURA RELAY · RIGHT SHOT · {game.supportGames}G · LINK {game.supportChain}</b></div><div className="relay-countdown" aria-label={`KAGURA RELAY 残り${game.supportGames}ゲーム`}>{Array.from({ length: 5 }, (_, index) => { const spent = index < 5 - game.supportGames; const current = index === 5 - game.supportGames; return <i className={spent ? "is-spent" : current ? "is-current" : ""} key={index}><b>{5 - index}</b></i>; })}<span>RELAY COUNT</span></div></>}
             {game.activeSource === "right" && (game.phase === "reach" || game.phase === "revival") && <div className={`relay-ritual relay-ritual--${game.phase}`}><i>ϟ</i><b>{game.phase === "revival" ? "REVIVAL / REIGNITE" : "RELAY RIFT / CONNECT"}</b></div>}
             {result && <div className="share-result"><button type="button" className="x-share-button" onClick={shareResult}><span aria-hidden="true">𝕏</span>結果画像をシェア</button><p className="share-status" role="status">{shareStatus || "PUSHで遊技ログを確認できます"}</p></div>}
+            {result && game.outcome && <section className="pachipachi-platform-result" aria-label="結果のシェアとランキング"><p className="pachipachi-platform-eyebrow">RESULT SIGNAL / ONLINE TOP 10</p><p className="pachipachi-result-score">記録スコア <b>{resultScore.toLocaleString()}点</b> / {OUTCOME_LABELS[game.outcome].title}</p><textarea className="pachipachi-share-text" readOnly value={resultText} aria-label="結果のシェア文" /><button type="button" className="pachipachi-share-button" onClick={shareResultText}>結果文をシェア／コピー</button><p className="pachipachi-ranking-status" role="status">{rankingStatus}</p><ol className="pachipachi-ranking-list" aria-label="オンラインランキング">{ranking.length > 0 ? ranking.map(row => <li key={`${row.rank}-${row.displayName}`}><span>{row.rank}. {row.displayName}</span><strong>{row.score.toLocaleString()}点</strong></li>) : <li>ランキングを読み込み中…</li>}</ol><a className="pachipachi-lab-link" href={LAB_URL} target="_blank" rel="noreferrer">カメレオンJPの実験場へ</a></section>}
           </div>
           <a href="#mobile-playfield" className="mobile-playfield-jump">PLAYFIELD <b>↓</b></a><div className="display-corners" aria-hidden="true"><i /><i /><i /><i /></div><div className="bezel-bolts" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
         </section>
